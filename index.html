@@ -16,7 +16,7 @@
   </style>
 </head>
 <body>
-  <h2>도수 vs 일일예약 자동 점검 도구</h2>
+  <h2>도수 vs 일일예약 자동 점검 도구 (테스트용)</h2>
   <div>
     <h3>1. 도수예약시트 업로드</h3>
     <input type="file" id="dosuFile" accept=".xlsx, .xls" />
@@ -53,9 +53,8 @@ function normalizeTime(time) {
 function extractDosuSheet(sheet) {
   const data = XLSX.utils.sheet_to_json(sheet, {header: 1});
   const result = [];
-  const startCol = 5, endCol = 11; // F~K
-  for (let col = startCol; col <= endCol; col++) {
-    for (let row = 3; row < data.length; row++) {
+  for (let col = 5; col <= 11; col++) {
+    for (let row = 4; row < data.length; row++) {
       const cell = data[row]?.[col];
       const time = normalizeTime(data[row]?.[4]);
       if (!cell || !time) continue;
