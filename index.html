@@ -25,6 +25,18 @@
   </div>
 
   <div class="section">
+    <h2>도수.xlsx 파싱 결과</h2>
+    <div id="dosuResult"></div>
+    <button id="downloadDosu" style="display:none;">도수 결과 다운로드</button>
+  </div>
+
+  <div class="section">
+    <h2>일일예약.xlsx 파싱 결과</h2>
+    <div id="reserveResult"></div>
+    <button id="downloadReserve" style="display:none;">일일예약 결과 다운로드</button>
+  </div>
+
+  <div class="section">
     <h2>비교 결과</h2>
     <div id="compareResult"></div>
     <button id="downloadCompare" style="display:none;">비교 결과 다운로드</button>
@@ -78,6 +90,7 @@
     function parseReserve(sheet) {
       const data = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
       const map = {};
+      const list = [];
       data.forEach(row => {
         const chart = row[3];
         const memo = row[10];
@@ -89,12 +102,14 @@
             const treatment = normalizeText(m[1]);
             const time = m[2] || '';
             const therapist = simplifyName(m[3]);
+            const item = { chart, treatment, time, therapist };
             if (!map[chart]) map[chart] = [];
-            map[chart].push({ treatment, time, therapist });
+            map[chart].push(item);
+            list.push(item);
           });
         }
       });
-      return map;
+      return { map, list };
     }
 
     function compareData(dosuList, reserveMap) {
@@ -131,7 +146,7 @@
     function exportToExcel(data, headers, filename) {
       const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "비교결과");
+      XLSX.utils.book_append_sheet(wb, ws, "결과");
       XLSX.writeFile(wb, filename);
     }
 
@@ -149,19 +164,30 @@
         const wb1 = XLSX.read(data1, {type:'array'});
         const dosuSheet = wb1.Sheets[wb1.SheetNames[0]];
         const dosuParsed = parseDosu(dosuSheet);
+        const dosuTable = dosuParsed.map(d => [d.time, d.chart, d.name, d.count, d.treatment, d.therapist]);
+        const dosuHeaders = ['시간','차트번호','성함','회차','치료명칭','담당자'];
+        document.getElementById('dosuResult').innerHTML = createTable(dosuHeaders, dosuTable);
+        document.getElementById('downloadDosu').style.display = 'inline-block';
+        document.getElementById('downloadDosu').onclick = () => exportToExcel(dosuTable, dosuHeaders, '도수결과.xlsx');
 
         const reader2 = new FileReader();
         reader2.onload = (e2) => {
           const data2 = new Uint8Array(e2.target.result);
           const wb2 = XLSX.read(data2, {type:'array'});
           const reserveSheet = wb2.Sheets[wb2.SheetNames[0]];
-          const reserveParsed = parseReserve(reserveSheet);
+          const { map: reserveMap, list: reserveList } = parseReserve(reserveSheet);
 
-          const compare = compareData(dosuParsed, reserveParsed);
-          const headers = ['차트번호','성함','시간(도수)','치료명칭(도수)','담당자(도수)','일일예약 시간','일일예약 치료명칭','일일예약 담당자','상태'];
-          document.getElementById('compareResult').innerHTML = createTable(headers, compare);
+          const reserveTable = reserveList.map(d => [d.chart, d.treatment, d.time, d.therapist]);
+          const reserveHeaders = ['차트번호','치료명칭','시간','담당자'];
+          document.getElementById('reserveResult').innerHTML = createTable(reserveHeaders, reserveTable);
+          document.getElementById('downloadReserve').style.display = 'inline-block';
+          document.getElementById('downloadReserve').onclick = () => exportToExcel(reserveTable, reserveHeaders, '일일예약결과.xlsx');
+
+          const compare = compareData(dosuParsed, reserveMap);
+          const compareHeaders = ['차트번호','성함','시간(도수)','치료명칭(도수)','담당자(도수)','일일예약 시간','일일예약 치료명칭','일일예약 담당자','상태'];
+          document.getElementById('compareResult').innerHTML = createTable(compareHeaders, compare);
           document.getElementById('downloadCompare').style.display = 'inline-block';
-          document.getElementById('downloadCompare').onclick = () => exportToExcel(compare, headers, '비교결과.xlsx');
+          document.getElementById('downloadCompare').onclick = () => exportToExcel(compare, compareHeaders, '비교결과.xlsx');
         };
         reader2.readAsArrayBuffer(reserveFile);
       };
