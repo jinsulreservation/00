@@ -26,6 +26,7 @@
     <input type="file" id="dailyFile" accept=".xlsx, .xls" />
   </div>
   <div id="result"></div>
+
 <script>
 let dosuData = [];
 let dailyData = {};
@@ -65,11 +66,15 @@ function extractDosuSheet(sheet) {
       const rawTime = data[row]?.[4];
       const time = normalizeTime(rawTime);
       if (!cell || !time) continue;
-      const tokens = cell.toString().split(/[\s\n]+/);
-      const chart = tokens.find(t => /^\d+$/.test(t));
-      const treat = tokens.find(t => !t.startsWith("#") && isNaN(t));
-      if (chart && treat) {
-        result.push({차트번호: chart.trim(), 치료명칭: treat.trim(), 시간: time});
+      const lines = cell.toString().split("\n");
+      for (let line of lines) {
+        const tokens = line.trim().split(" ");
+        const chart = tokens.find(t => /^\d+$/.test(t));
+        const treat = tokens.find(t => !t.startsWith("#") && isNaN(t));
+        if (chart && treat) {
+          const stdTreat = Object.entries(treatMap).find(([k, v]) => v.includes(treat))?.[0] || treat;
+          result.push({차트번호: chart.trim(), 치료명칭: stdTreat.trim(), 시간: time});
+        }
       }
     }
   }
@@ -80,10 +85,8 @@ function parseDailyMemo(memo) {
   if (typeof memo !== "string") return [];
   const matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\((\d{1,2}:\d{2})\)/g)];
   return matches.map(m => {
-    const raw = m[1];
-    const time = m[2];
-    const treat = Object.entries(treatMap).find(([_, vals]) => vals.includes(raw))?.[0] || raw;
-    return {치료명칭: treat, 시간: normalizeTime(time)};
+    const stdTreat = Object.entries(treatMap).find(([k, v]) => v.includes(m[1]))?.[0] || m[1];
+    return {치료명칭: stdTreat, 시간: normalizeTime(m[2])};
   });
 }
 
@@ -105,17 +108,9 @@ function compareAndRender() {
   if (dosuData.length === 0 || Object.keys(dailyData).length === 0) return;
 
   const results = dosuData.map(row => {
-    const dailyList = dailyData[row.차트번호] || [];
-    const match = dailyList.some(d => 
-      normalizeTime(d.시간) === normalizeTime(row.시간) &&
-      (d.치료명칭 === row.치료명칭 || (treatMap[row.치료명칭]?.includes(d.치료명칭)))
-    );
-    return {
-      차트번호: row.차트번호,
-      치료명칭: row.치료명칭,
-      시간: row.시간,
-      상태: match ? "확인" : (dailyList.length ? "점검필요" : "-")
-    };
+    const list = dailyData[row.차트번호] || [];
+    const match = list.some(d => d.치료명칭 === row.치료명칭 && d.시간 === row.시간);
+    return {...row, 상태: match ? "확인" : (list.length ? "점검필요" : "-")};
   });
 
   const total = results.length;
