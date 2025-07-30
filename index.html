@@ -37,22 +37,21 @@ const treatMap = {
   "충6.3": ["충격파치료6.3", "충격파6.3", "충6.3"],
   "충7": ["충격파치료7", "충격파7", "충7"],
   "충7.7": ["충격파치료7.7", "충격파7.7", "충7.7"],
-  "충9": ["충격파치료9", "충격파9", "충9"]
+  "충9": ["충격파치료9", "충격파9", "충9"],
+  "충4.9": ["충격파치료4.9", "충4.9", "충격파4.9"]
 };
 
 function normalizeTime(time) {
-  if (!time || typeof time !== "string") return "";
-  const clean = time.trim();
-  if (!/^\d{1,2}:\d{2}$/.test(clean)) return "";
-  return clean.length === 4 ? "0" + clean : clean;
-}
-
-function findTopTime(data, row) {
-  for (let r = row; r >= 0; r--) {
-    const t = data[r]?.[4];
-    if (t && typeof t === "string" && t.includes(":")) {
-      return normalizeTime(t);
-    }
+  if (!time) return "";
+  if (typeof time === "number") {
+    const totalMinutes = Math.floor(time * 24 * 60);
+    const hh = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+    const mm = String(totalMinutes % 60).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+  if (typeof time === "string") {
+    const clean = time.trim();
+    if (/^\d{1,2}:\d{2}$/.test(clean)) return clean.length === 4 ? "0" + clean : clean;
   }
   return "";
 }
@@ -60,20 +59,30 @@ function findTopTime(data, row) {
 function extractDosuSheet(sheet) {
   const data = XLSX.utils.sheet_to_json(sheet, {header: 1});
   const result = [];
-  for (let col = 5; col <= 11; col++) {
-    for (let row = 4; row < data.length; row++) {
+
+  for (let row = 4; row < data.length; row++) {
+    let time = normalizeTime(data[row]?.[4]);
+    if (!time) {
+      // 위쪽 행에서 시간 찾기 (병합 셀 대응)
+      for (let up = row - 1; up >= 0; up--) {
+        time = normalizeTime(data[up]?.[4]);
+        if (time) break;
+      }
+    }
+
+    for (let col = 5; col <= 11; col++) {
       const cell = data[row]?.[col];
-      if (!cell) continue;
-      const time = findTopTime(data, row);
-      if (!time) continue;
+      if (!cell || !time) continue;
       const tokens = cell.toString().split(" ");
       const chart = tokens.find(t => /^\d+$/.test(t));
-      const treat = tokens.find(t => !t.startsWith("#") && isNaN(t));
-      if (chart && treat) {
+      const treatRaw = tokens.find(t => !t.startsWith("#") && isNaN(t));
+      if (chart && treatRaw) {
+        const treat = Object.entries(treatMap).find(([_, list]) => list.includes(treatRaw))?.[0] || treatRaw;
         result.push({차트번호: chart.trim(), 치료명칭: treat.trim(), 시간: time});
       }
     }
   }
+
   return result;
 }
 
@@ -101,9 +110,8 @@ function extractDailySheet(sheet) {
 }
 
 function compareAndRender() {
-  const container = document.getElementById("result");
   if (dosuData.length === 0 || Object.keys(dailyData).length === 0) {
-    container.innerHTML = "<p>파일을 모두 업로드해주세요.</p>";
+    document.getElementById("result").innerHTML = "<p>파일을 모두 업로드해주세요.</p>";
     return;
   }
 
@@ -137,7 +145,7 @@ function compareAndRender() {
   });
 
   html += "</tbody></table>";
-  container.innerHTML = html;
+  document.getElementById("result").innerHTML = html;
 }
 
 document.getElementById("dosuFile").addEventListener("change", e => {
