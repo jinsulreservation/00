@@ -51,24 +51,38 @@
     }
 
     function parseDosu(sheet) {
-      const data = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
+      const data = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
       const results = [];
+
       data.forEach(row => {
         const time = row[0] || row[4];
-        for (let i=1; i<=6; i++) {
-          const cell = row[i];
-          if (typeof cell === "string" && cell.includes("#") && cell.includes("\n")) {
-            const [upper, lower] = cell.split("\n");
-            const m1 = upper.match(/(\d+)([가-힣]+)#?(\d+)/);
-            const m2 = lower.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충\d*\.?\d*)\s*([가-힣]+)/);
+
+        row.forEach((cell, idx) => {
+          if (typeof cell === "string" && cell.includes("#")) {
+            const lines = cell.split("\n");
+            let upper = lines[0] || "";
+            let lower = lines[1] || "";
+
+            const m1 = upper.match(/(\d+)\s*([가-힣]+)\s*#?(\d+)/);
+            let m2 = lower.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충격파\d*\.?\d*|충\d*\.?\d*)\s*([가-힣]+)/);
+            if (!m2) {
+              m2 = upper.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충격파\d*\.?\d*|충\d*\.?\d*)\s*([가-힣]+)/);
+            }
+
             if (m1 && m2) {
               results.push([
-                time, m1[1], m1[2], "#"+m1[3], m2[1], m2[2]
+                time,
+                m1[1],
+                m1[2],
+                "#" + m1[3],
+                m2[1],
+                m2[2]
               ]);
             }
           }
-        }
+        });
       });
+
       return results;
     }
 
