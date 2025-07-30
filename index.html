@@ -29,7 +29,7 @@
 
 <script>
 let dosuData = [];
-let dailyData = [];
+let dailyData = {};
 
 const treatMap = {
   "도9": ["도수치료9", "도수9", "도9"],
@@ -41,19 +41,26 @@ const treatMap = {
   "충4.9": ["충격파치료4.9", "충4.9", "충격파4.9"]
 };
 
-function normalizeTime(time) {
-  if (!time) return "";
-  if (typeof time === "number") {
-    const totalMinutes = Math.floor(time * 24 * 60);
-    const hh = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
-    const mm = String(totalMinutes % 60).padStart(2, "0");
+function normalizeTime(value) {
+  if (!value) return "";
+  if (typeof value === "number") {
+    const totalMinutes = Math.round(value * 24 * 60);
+    const hh = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
+    const mm = String(totalMinutes % 60).padStart(2, '0');
     return `${hh}:${mm}`;
   }
-  if (typeof time === "string") {
-    const clean = time.trim();
-    if (/^\d{1,2}:\d{2}$/.test(clean)) return clean.length === 4 ? "0" + clean : clean;
+  if (typeof value === "string") {
+    let parts = value.trim().split(":");
+    if (parts.length === 2) {
+      return parts[0].padStart(2, "0") + ":" + parts[1].padStart(2, "0");
+    }
   }
   return "";
+}
+
+function 치료명칭일치(dosuTreat, dailyTreat) {
+  const candidates = treatMap[dosuTreat] || [dosuTreat];
+  return candidates.some(alias => dailyTreat.includes(alias));
 }
 
 function extractDosuSheet(sheet) {
@@ -63,7 +70,7 @@ function extractDosuSheet(sheet) {
   for (let row = 4; row < data.length; row++) {
     let time = normalizeTime(data[row]?.[4]);
     if (!time) {
-      // 위쪽 행에서 시간 찾기 (병합 셀 대응)
+      // 병합된 셀 대응: 위쪽 행의 시간 사용
       for (let up = row - 1; up >= 0; up--) {
         time = normalizeTime(data[up]?.[4]);
         if (time) break;
@@ -77,7 +84,7 @@ function extractDosuSheet(sheet) {
       const chart = tokens.find(t => /^\d+$/.test(t));
       const treatRaw = tokens.find(t => !t.startsWith("#") && isNaN(t));
       if (chart && treatRaw) {
-        const treat = Object.entries(treatMap).find(([_, list]) => list.includes(treatRaw))?.[0] || treatRaw;
+        const treat = Object.entries(treatMap).find(([_, v]) => v.includes(treatRaw))?.[0] || treatRaw;
         result.push({차트번호: chart.trim(), 치료명칭: treat.trim(), 시간: time});
       }
     }
@@ -111,13 +118,15 @@ function extractDailySheet(sheet) {
 
 function compareAndRender() {
   if (dosuData.length === 0 || Object.keys(dailyData).length === 0) {
-    document.getElementById("result").innerHTML = "<p>파일을 모두 업로드해주세요.</p>";
+    document.getElementById("result").innerHTML = "<p>📂 두 파일 모두 업로드해주세요.</p>";
     return;
   }
 
   const results = dosuData.map(row => {
     const list = dailyData[row.차트번호] || [];
-    const match = list.some(d => d.치료명칭 === row.치료명칭 && d.시간 === row.시간);
+    const match = list.some(d => 
+      d.시간 === row.시간 && 치료명칭일치(row.치료명칭, d.치료명칭)
+    );
     return {...row, 상태: match ? "확인" : (list.length ? "점검필요" : "-")};
   });
 
@@ -126,8 +135,8 @@ function compareAndRender() {
   const warn = results.filter(r => r.상태 === "점검필요").length;
 
   let html = `
-    <h3>점검 결과</h3>
-    <p><strong>총 ${total}건 중 확인: ${ok}건 / 점검필요: ${warn}건</strong></p>
+    <h3>📊 점검 결과</h3>
+    <p><strong>총 ${total}건 중 <span class="green">확인: ${ok}</span>건 / <span class="red">점검필요: ${warn}</span>건</strong></p>
     <table>
       <thead><tr><th>차트번호</th><th>치료명칭</th><th>시간</th><th>상태</th></tr></thead>
       <tbody>
