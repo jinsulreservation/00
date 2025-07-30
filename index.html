@@ -1,115 +1,150 @@
-
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <title>도수 vs 일일예약 비교 도구</title>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <meta charset="UTF-8">
+  <title>도수 vs 일일예약 자동 점검 도구</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 900px; margin: auto; }
-    h1 { color: #2c3e50; }
-    input { margin-bottom: 10px; }
-    .result { margin-top: 20px; white-space: pre-wrap; background: #f5f5f5; padding: 10px; border: 1px solid #ccc; }
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 1200px; margin: auto; }
+    h2 { color: #2c3e50; }
+    input[type="file"] { margin-bottom: 10px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background: #f0f0f0; }
+    .green { color: green; font-weight: bold; }
+    .red { color: red; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h1>도수 vs 일일예약 비교 도구</h1>
-
+  <h2>도수 vs 일일예약 자동 점검 도구</h2>
   <div>
-    <label>① 도수예약시트 업로드: </label>
-    <input type="file" id="dossuFile" accept=".xlsx,.xls" />
+    <h3>1. 도수예약시트 업로드</h3>
+    <input type="file" id="dosuFile" accept=".xlsx, .xls" />
   </div>
   <div>
-    <label>② 일일예약 업로드: </label>
-    <input type="file" id="dailyFile" accept=".xlsx,.xls" />
+    <h3>2. 일일예약 업로드</h3>
+    <input type="file" id="dailyFile" accept=".xlsx, .xls" />
   </div>
-  <button onclick="processFiles()">비교 실행</button>
+  <div id="result"></div>
 
-  <div class="result" id="output">결과 출력창</div>
+<script>
+let dosuData = [];
+let dailyData = [];
 
-  <script>
-    let dossuData = [];
-    let dailyMemoList = [];
+const treatMap = {
+  "도9": ["도수치료9", "도수9", "도9"],
+  "도15": ["도수치료15", "도수15", "도15"],
+  "충6.3": ["충격파치료6.3", "충격파6.3", "충6.3"],
+  "충7": ["충격파치료7", "충격파7", "충7"],
+  "충7.7": ["충격파치료7.7", "충격파7.7", "충7.7"],
+  "충9": ["충격파치료9", "충격파9", "충9"]
+};
 
-    function readExcelFile(file, callback) {
-      const reader = new FileReader();
-      reader.onload = function (e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
-        callback(sheet);
-      };
-      reader.readAsArrayBuffer(file);
-    }
+function normalizeTime(time) {
+  if (!time) return "";
+  try {
+    const date = new Date("1970-01-01T" + time);
+    return date.toTimeString().slice(0,5);
+  } catch {
+    return time.slice(0,5);
+  }
+}
 
-    function processFiles() {
-      const dossuFile = document.getElementById('dossuFile').files[0];
-      const dailyFile = document.getElementById('dailyFile').files[0];
-      if (!dossuFile || !dailyFile) {
-        alert('두 파일을 모두 업로드해주세요.');
-        return;
-      }
-
-      readExcelFile(dossuFile, dossuSheet => {
-        readExcelFile(dailyFile, dailySheet => {
-          parseDossuSheet(dossuSheet);
-          parseDailySheet(dailySheet);
-          compareData();
-        });
-      });
-    }
-
-    function parseDossuSheet(sheet) {
-      dossuData = [];
-      for (let row of sheet) {
-        if (!row[0]) continue;
-        const time = (row[0] + '').trim(); // E열
-        const chartNo = row.find(cell => typeof cell === 'string' && /^\d{4}$/.test(cell)); // 4자리 숫자
-        const count = row.find(cell => typeof cell === 'string' && /#\d+/.test(cell));
-        const treat = row.find(cell => typeof cell === 'string' && /도|충|기/.test(cell));
-        const staff = row.find(cell => typeof cell === 'string' && /^[가-힣]{2,}$/.test(cell));
-        if (time && chartNo && treat && staff) {
-          dossuData.push({ time, chartNo, treat, staff });
-        }
+function extractDosuSheet(sheet) {
+  const data = XLSX.utils.sheet_to_json(sheet, {header: 1});
+  const result = [];
+  const startCol = 5, endCol = 11; // F~K
+  for (let col = startCol; col <= endCol; col++) {
+    for (let row = 3; row < data.length; row++) {
+      const cell = data[row]?.[col];
+      const time = normalizeTime(data[row]?.[4]);
+      if (!cell || !time) continue;
+      const tokens = cell.toString().split(" ");
+      const chart = tokens.find(t => /^\d+$/.test(t));
+      const treat = tokens.find(t => !t.startsWith("#") && isNaN(t));
+      if (chart && treat) {
+        result.push({차트번호: chart.trim(), 치료명칭: treat.trim(), 시간: time});
       }
     }
+  }
+  return result;
+}
 
-    function parseDailySheet(sheet) {
-      dailyMemoList = [];
-      const memoColIndex = sheet[0].findIndex(h => h.toString().includes("메모") || h.toString().includes("예약"));
-      for (let i = 1; i < sheet.length; i++) {
-        const row = sheet[i];
-        if (memoColIndex >= 0 && row[memoColIndex]) {
-          dailyMemoList.push(row[memoColIndex].toString());
-        }
-      }
+function parseDailyMemo(memo) {
+  const matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\((\d{1,2}:\d{2})\)/g)];
+  return matches.map(m => {
+    const treat = Object.entries(treatMap).find(([_, vals]) => vals.includes(m[1]))?.[0] || m[1];
+    return {치료명칭: treat, 시간: normalizeTime(m[2])};
+  });
+}
+
+function extractDailySheet(sheet) {
+  const data = XLSX.utils.sheet_to_json(sheet);
+  const map = {};
+  data.forEach(row => {
+    const chart = String(row["차트번호"] || "").trim();
+    const memo = row["메모"] || "";
+    const entries = parseDailyMemo(memo);
+    if (chart && entries.length > 0) {
+      map[chart] = (map[chart] || []).concat(entries);
     }
+  });
+  return map;
+}
 
-    function compareData() {
-      let output = "";
-      let matched = 0;
-      let unmatched = 0;
+function compareAndRender() {
+  if (dosuData.length === 0 || Object.keys(dailyData).length === 0) return;
 
-      for (let dossu of dossuData) {
-        const match = dailyMemoList.find(memo =>
-          memo.includes(dossu.chartNo) &&
-          memo.includes(dossu.treat) &&
-          memo.includes(dossu.staff) &&
-          memo.includes(`(${dossu.time})`)
-        );
-        if (match) {
-          output += `✅ 확인됨: ${dossu.time} ${dossu.chartNo} ${dossu.treat} ${dossu.staff}\n`;
-          matched++;
-        } else {
-          output += `❌ 미확인: ${dossu.time} ${dossu.chartNo} ${dossu.treat} ${dossu.staff}\n`;
-          unmatched++;
-        }
-      }
+  const results = dosuData.map(row => {
+    const list = dailyData[row.차트번호] || [];
+    const match = list.some(d => d.치료명칭 === row.치료명칭 && d.시간 === row.시간);
+    return {...row, 상태: match ? "확인" : (list.length ? "점검필요" : "-")};
+  });
 
-      output += `\n총 ${dossuData.length}건 중 확인: ${matched}건 / 미확인: ${unmatched}건`;
-      document.getElementById("output").innerText = output;
-    }
-  </script>
+  const total = results.length;
+  const ok = results.filter(r => r.상태 === "확인").length;
+  const warn = results.filter(r => r.상태 === "점검필요").length;
+
+  const html = `
+    <h3>점검 결과</h3>
+    <p><strong>총 ${total}건 중 확인: ${ok}건 / 점검필요: ${warn}건</strong></p>
+    <table>
+      <thead><tr><th>차트번호</th><th>치료명칭</th><th>시간</th><th>상태</th></tr></thead>
+      <tbody>
+        ${results.map(r => `
+          <tr>
+            <td>${r.차트번호}</td>
+            <td>${r.치료명칭}</td>
+            <td>${r.시간}</td>
+            <td class="${r.상태 === "확인" ? "green" : r.상태 === "점검필요" ? "red" : ""}">${r.상태}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+
+  document.getElementById("result").innerHTML = html;
+}
+
+document.getElementById("dosuFile").addEventListener("change", e => {
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const workbook = XLSX.read(evt.target.result, {type: 'binary'});
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    dosuData = extractDosuSheet(sheet);
+    compareAndRender();
+  };
+  reader.readAsBinaryString(e.target.files[0]);
+});
+
+document.getElementById("dailyFile").addEventListener("change", e => {
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const workbook = XLSX.read(evt.target.result, {type: 'binary'});
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    dailyData = extractDailySheet(sheet);
+    compareAndRender();
+  };
+  reader.readAsBinaryString(e.target.files[0]);
+});
+</script>
 </body>
 </html>
