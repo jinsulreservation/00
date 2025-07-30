@@ -58,12 +58,12 @@
         for (let i=1; i<=6; i++) {
           const cell = row[i];
           if (typeof cell === "string" && cell.includes("#") && cell.includes("\n")) {
-            const [upper, lower] = cell.split("\n");
+            const [upper, lower] = cell.split("\n").map(x => x.trim());
             const m1 = upper.match(/(\d+)([가-힣]+)#?(\d+)/);
-            const m2 = lower.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충\d*\.?\d*)\s*([가-힣]+)/);
+            const m2 = lower.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충\d*\.?\d*)\s*([가-힣()]+)/);
             if (m1 && m2) {
               results.push([
-                time, m1[1], m1[2], "#"+m1[3], m2[1], m2[2]
+                time, m1[1], m1[2], "#"+m1[3], m2[1].replace(" ", ""), m2[2].replace(/[()]/g, '')
               ]);
             }
           }
@@ -82,24 +82,20 @@
         const norm = normalizeText(memo);
         if (keywords.some(k => norm.includes(normalizeText(k)))) {
           const parsed = [];
-          let matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\(?(\d{1,2}:\d{2})?\)?\s*([가-힣]+)?/g)];
+          let matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\(?([0-9]{1,2}:[0-9]{2})?\)?\s*([가-힣]+)?/g)];
           matches.forEach(m => {
             if (keywords.some(k => normalizeText(m[1]).includes(normalizeText(k)))) {
               parsed.push(m[1], m[2] || '', m[3] || '');
             }
           });
-          if (parsed.length) {
-            results.push([chart, ...parsed]);
-          }
+          if (parsed.length) results.push([chart, ...parsed]);
         }
       });
       return results;
     }
 
     function createTable(headers, rows) {
-      let html = '<table><thead><tr>';
-      headers.forEach(h => html += `<th>${h}</th>`);
-      html += '</tr></thead><tbody>';
+      let html = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>';
       rows.forEach(r => {
         html += '<tr>' + r.map(c => `<td>${c||''}</td>`).join('') + '</tr>';
       });
