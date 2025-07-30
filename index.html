@@ -1,168 +1,153 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <title>도수 vs 일일예약 자동 점검 도구</title>
+  <meta charset="UTF-8" />
+  <title>도수 & 일일예약 파싱 도구</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; max-width: 1200px; margin: auto; }
-    h2 { color: #2c3e50; }
-    input[type="file"] { margin-bottom: 10px; }
+    h1 { color: #2c3e50; }
+    input[type="file"] { margin: 5px 0; }
+    button { padding: 8px 16px; margin-top: 10px; cursor: pointer; }
     table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
     th { background: #f0f0f0; }
-    .green { color: green; font-weight: bold; }
-    .red { color: red; font-weight: bold; }
+    .section { margin-top: 40px; }
   </style>
 </head>
 <body>
-  <h2>도수 vs 일일예약 자동 점검 도구</h2>
+  <h1>도수 & 일일예약 파싱 도구</h1>
+
   <div>
-    <h3>1. 도수예약시트 업로드</h3>
-    <input type="file" id="dosuFile" accept=".xlsx, .xls" />
+    <label>도수 파일: <input type="file" id="dosuFile" accept=".xlsx" /></label><br />
+    <label>일일예약 파일: <input type="file" id="reserveFile" accept=".xlsx" /></label><br />
+    <button onclick="processFiles()">진행</button>
   </div>
-  <div>
-    <h3>2. 일일예약 업로드</h3>
-    <input type="file" id="dailyFile" accept=".xlsx, .xls" />
+
+  <div class="section">
+    <h2>도수.xlsx 파싱 결과</h2>
+    <div id="dosuResult"></div>
+    <button id="downloadDosu" style="display:none;">도수 결과 다운로드</button>
   </div>
-  <div id="result"></div>
 
-<script>
-let dosuData = [];
-let dailyData = {};
+  <div class="section">
+    <h2>일일예약.xlsx 파싱 결과</h2>
+    <div id="reserveResult"></div>
+    <button id="downloadReserve" style="display:none;">일일예약 결과 다운로드</button>
+  </div>
 
-const treatMap = {
-  "도9": ["도수치료9", "도수9", "도9", "도수 9"],
-  "도15": ["도수치료15", "도수15", "도15", "도수 15"],
-  "충6.3": ["충격파치료6.3", "충격파6.3", "충6.3", "충격파 6.3"],
-  "충7": ["충격파치료7", "충격파7", "충7", "충격파 7"],
-  "충7.7": ["충격파치료7.7", "충격파7.7", "충7.7", "충격파 7.7"],
-  "충9": ["충격파치료9", "충격파9", "충9", "충격파 9"],
-  "도수": ["도수", "도수치료", "도수치료1회"],
-  "충격파": ["충격파", "충격파치료", "충격파치료1회"]
-};
+  <script>
+    const keywords = [
+      "도수치료9","도수9","도9",
+      "도수치료15","도수15","도15",
+      "충격파치료6.3","충격파6.3","충6.3",
+      "충격파치료7","충격파7","충7",
+      "충격파치료7.7","충격파7.7","충7.7",
+      "충격파치료9","충격파9","충9"
+    ];
 
-function normalizeTime(time) {
-  if (!time) return "";
-  if (typeof time === "string") {
-    const match = time.trim().match(/(\d{1,2}):(\d{2})/);
-    if (match) {
-      const hh = match[1].padStart(2, "0");
-      const mm = match[2].padStart(2, "0");
-      return `${hh}:${mm}`;
+    function normalizeText(text) {
+      return text.replace(/\s+/g, '');
     }
-  }
-  if (typeof time === "number") {
-    const totalMinutes = Math.round(time * 24 * 60);
-    const hh = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
-    const mm = String(totalMinutes % 60).padStart(2, '0');
-    return `${hh}:${mm}`;
-  }
-  if (time instanceof Date) {
-    return time.toTimeString().slice(0, 5);
-  }
-  return "";
-}
 
-function extractDosuSheet(sheet) {
-  const data = XLSX.utils.sheet_to_json(sheet, {header: 1});
-  const result = [];
-  for (let col = 5; col <= 11; col++) {
-    for (let row = 4; row < data.length; row++) {
-      const cell = data[row]?.[col];
-      const rawTime = data[row]?.[4];
-      const time = normalizeTime(rawTime);
-      if (!cell || !time) continue;
-      const lines = cell.toString().split("\n");
-      for (let line of lines) {
-        const tokens = line.trim().split(" ");
-        const chart = tokens.find(t => /^\d+$/.test(t));
-        const treat = tokens.find(t => !t.startsWith("#") && isNaN(t));
-        if (chart && treat) {
-          const stdTreat = Object.entries(treatMap).find(([_, v]) => v.includes(treat))?.[0] || treat;
-          result.push({차트번호: chart.trim(), 치료명칭: stdTreat.trim(), 시간: time});
+    function parseDosu(sheet) {
+      const data = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
+      const results = [];
+      data.forEach(row => {
+        const time = row[0] || row[4];
+        for (let i=1; i<=6; i++) {
+          const cell = row[i];
+          if (typeof cell === "string" && cell.includes("#") && cell.includes("\n")) {
+            const [upper, lower] = cell.split("\n");
+            const m1 = upper.match(/(\d+)([가-힣]+)#?(\d+)/);
+            const m2 = lower.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충\d*\.?\d*)\s*([가-힣]+)/);
+            if (m1 && m2) {
+              results.push([
+                time, m1[1], m1[2], "#"+m1[3], m2[1], m2[2]
+              ]);
+            }
+          }
         }
+      });
+      return results;
+    }
+
+    function parseReserve(sheet) {
+      const data = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
+      const results = [];
+      data.forEach(row => {
+        const chart = row[3];
+        const memo = row[10];
+        if (!chart || !memo) return;
+        const norm = normalizeText(memo);
+        if (keywords.some(k => norm.includes(normalizeText(k)))) {
+          const parsed = [];
+          let matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\(?(\d{1,2}:\d{2})?\)?\s*([가-힣]+)?/g)];
+          matches.forEach(m => {
+            if (keywords.some(k => normalizeText(m[1]).includes(normalizeText(k)))) {
+              parsed.push(m[1], m[2] || '', m[3] || '');
+            }
+          });
+          if (parsed.length) {
+            results.push([chart, ...parsed]);
+          }
+        }
+      });
+      return results;
+    }
+
+    function createTable(headers, rows) {
+      let html = '<table><thead><tr>';
+      headers.forEach(h => html += `<th>${h}</th>`);
+      html += '</tr></thead><tbody>';
+      rows.forEach(r => {
+        html += '<tr>' + r.map(c => `<td>${c||''}</td>`).join('') + '</tr>';
+      });
+      html += '</tbody></table>';
+      return html;
+    }
+
+    function exportToExcel(data, headers, filename) {
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "결과");
+      XLSX.writeFile(wb, filename);
+    }
+
+    function processFiles() {
+      const dosuFile = document.getElementById('dosuFile').files[0];
+      const reserveFile = document.getElementById('reserveFile').files[0];
+      if (!dosuFile || !reserveFile) {
+        alert("두 파일 모두 업로드하세요.");
+        return;
       }
+
+      const reader1 = new FileReader();
+      reader1.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, {type:'array'});
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const dosuData = parseDosu(sheet);
+        const headers = ['시간','차트번호','성함','회차','치료명칭','담당자'];
+        document.getElementById('dosuResult').innerHTML = createTable(headers, dosuData);
+        document.getElementById('downloadDosu').style.display = 'inline-block';
+        document.getElementById('downloadDosu').onclick = () => exportToExcel(dosuData, headers, '도수결과.xlsx');
+      };
+      reader1.readAsArrayBuffer(dosuFile);
+
+      const reader2 = new FileReader();
+      reader2.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, {type:'array'});
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const reserveData = parseReserve(sheet);
+        const headers = ['차트번호','치료명칭1','시간1','담당자1','치료명칭2','시간2','담당자2'];
+        document.getElementById('reserveResult').innerHTML = createTable(headers, reserveData);
+        document.getElementById('downloadReserve').style.display = 'inline-block';
+        document.getElementById('downloadReserve').onclick = () => exportToExcel(reserveData, headers, '일일예약결과.xlsx');
+      };
+      reader2.readAsArrayBuffer(reserveFile);
     }
-  }
-  return result;
-}
-
-function parseDailyMemo(memo) {
-  if (typeof memo !== "string") return [];
-  const matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\((\d{1,2}:\d{2})\)/g)];
-  return matches.map(m => {
-    const stdTreat = Object.entries(treatMap).find(([_, v]) => v.includes(m[1]))?.[0] || m[1];
-    return {치료명칭: stdTreat, 시간: normalizeTime(m[2])};
-  });
-}
-
-function extractDailySheet(sheet) {
-  const data = XLSX.utils.sheet_to_json(sheet);
-  const map = {};
-  data.forEach(row => {
-    const chart = String(row["차트번호"] || row["차트 번호"] || "").trim();
-    const memo = String(row["메모"] || row["예약메모"] || row["메모내용"] || "").trim();
-    const entries = parseDailyMemo(memo);
-    if (chart && entries.length > 0) {
-      map[chart] = (map[chart] || []).concat(entries);
-    }
-  });
-  return map;
-}
-
-function compareAndRender() {
-  if (dosuData.length === 0 || Object.keys(dailyData).length === 0) return;
-
-  const results = dosuData.map(row => {
-    const list = dailyData[row.차트번호] || [];
-    const match = list.some(d => d.치료명칭 === row.치료명칭 && d.시간 === row.시간);
-    return {...row, 상태: match ? "확인" : (list.length ? "점검필요" : "-")};
-  });
-
-  const total = results.length;
-  const ok = results.filter(r => r.상태 === "확인").length;
-  const warn = results.filter(r => r.상태 === "점검필요").length;
-
-  const html = `
-    <h3>점검 결과</h3>
-    <p><strong>총 ${total}건 중 확인: ${ok}건 / 점검필요: ${warn}건</strong></p>
-    <table>
-      <thead><tr><th>차트번호</th><th>치료명칭</th><th>시간</th><th>상태</th></tr></thead>
-      <tbody>
-        ${results.map(r => `
-          <tr>
-            <td>${r.차트번호}</td>
-            <td>${r.치료명칭}</td>
-            <td>${r.시간}</td>
-            <td class="${r.상태 === "확인" ? "green" : r.상태 === "점검필요" ? "red" : ""}">${r.상태}</td>
-          </tr>`).join("")}
-      </tbody>
-    </table>`;
-  document.getElementById("result").innerHTML = html;
-}
-
-document.getElementById("dosuFile").addEventListener("change", e => {
-  const reader = new FileReader();
-  reader.onload = evt => {
-    const workbook = XLSX.read(evt.target.result, {type: 'binary'});
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    dosuData = extractDosuSheet(sheet);
-    compareAndRender();
-  };
-  reader.readAsBinaryString(e.target.files[0]);
-});
-
-document.getElementById("dailyFile").addEventListener("change", e => {
-  const reader = new FileReader();
-  reader.onload = evt => {
-    const workbook = XLSX.read(evt.target.result, {type: 'binary'});
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    dailyData = extractDailySheet(sheet);
-    compareAndRender();
-  };
-  reader.readAsBinaryString(e.target.files[0]);
-});
-</script>
+  </script>
 </body>
 </html>
