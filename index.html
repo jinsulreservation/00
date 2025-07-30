@@ -25,15 +25,9 @@
   </div>
 
   <div class="section">
-    <h2>도수.xlsx 파싱 결과</h2>
-    <div id="dosuResult"></div>
-    <button id="downloadDosu" style="display:none;">도수 결과 다운로드</button>
-  </div>
-
-  <div class="section">
-    <h2>일일예약.xlsx 파싱 결과</h2>
-    <div id="reserveResult"></div>
-    <button id="downloadReserve" style="display:none;">일일예약 결과 다운로드</button>
+    <h2>비교 결과</h2>
+    <div id="compareResult"></div>
+    <button id="downloadCompare" style="display:none;">비교 결과 다운로드</button>
   </div>
 
   <script>
@@ -47,7 +41,11 @@
     ];
 
     function normalizeText(text) {
-      return text.replace(/\s+/g, '');
+      return text.replace(/\s+/g, '').replace(/\(.+\)/g, '').trim();
+    }
+
+    function simplifyName(name) {
+      return name ? name.replace(/[^가-힣]/g, '') : '';
     }
 
     function parseDosu(sheet) {
@@ -60,11 +58,16 @@
           if (typeof cell === "string" && cell.includes("#") && cell.includes("\n")) {
             const [upper, lower] = cell.split("\n").map(x => x.trim());
             const m1 = upper.match(/(\d+)([가-힣]+)#?(\d+)/);
-            const m2 = lower.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충\d*\.?\d*)\s*([가-힣()]+)/);
+            const m2 = lower.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충\d*\.?\d*)\s*([가-힣A-Za-z()]+)/);
             if (m1 && m2) {
-              results.push([
-                time, m1[1], m1[2], "#"+m1[3], m2[1].replace(" ", ""), m2[2].replace(/[()]/g, '')
-              ]);
+              results.push({
+                chart: m1[1],
+                name: m1[2],
+                time: time,
+                count: "#"+m1[3],
+                treatment: m2[1].replace(" ", ""),
+                therapist: simplifyName(m2[2])
+              });
             }
           }
         }
@@ -74,22 +77,44 @@
 
     function parseReserve(sheet) {
       const data = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
-      const results = [];
+      const map = {};
       data.forEach(row => {
         const chart = row[3];
         const memo = row[10];
         if (!chart || !memo) return;
         const norm = normalizeText(memo);
         if (keywords.some(k => norm.includes(normalizeText(k)))) {
-          const parsed = [];
-          let matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\(?([0-9]{1,2}:[0-9]{2})?\)?\s*([가-힣]+)?/g)];
+          let matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\(?([0-9]{1,2}:[0-9]{2})?\)?\s*([가-힣A-Za-z]+)/g)];
           matches.forEach(m => {
-            if (keywords.some(k => normalizeText(m[1]).includes(normalizeText(k)))) {
-              parsed.push(m[1], m[2] || '', m[3] || '');
-            }
+            const treatment = normalizeText(m[1]);
+            const time = m[2] || '';
+            const therapist = simplifyName(m[3]);
+            if (!map[chart]) map[chart] = [];
+            map[chart].push({ treatment, time, therapist });
           });
-          if (parsed.length) results.push([chart, ...parsed]);
         }
+      });
+      return map;
+    }
+
+    function compareData(dosuList, reserveMap) {
+      const results = [];
+      dosuList.forEach(dosu => {
+        const reserveList = reserveMap[dosu.chart] || [];
+        let match = reserveList.find(r =>
+          normalizeText(r.treatment) === normalizeText(dosu.treatment) &&
+          normalizeText(r.time) === normalizeText(dosu.time) &&
+          simplifyName(r.therapist) === simplifyName(dosu.therapist)
+        );
+
+        const status = match ? "✅ 일치" : (reserveList.length ? "⚠ 불일치" : "❌ 미등록됨");
+        results.push([
+          dosu.chart, dosu.name, dosu.time, dosu.treatment, dosu.therapist,
+          reserveList[0]?.time || '',
+          reserveList[0]?.treatment || '',
+          reserveList[0]?.therapist || '',
+          status
+        ]);
       });
       return results;
     }
@@ -106,7 +131,7 @@
     function exportToExcel(data, headers, filename) {
       const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "결과");
+      XLSX.utils.book_append_sheet(wb, ws, "비교결과");
       XLSX.writeFile(wb, filename);
     }
 
@@ -119,30 +144,28 @@
       }
 
       const reader1 = new FileReader();
-      reader1.onload = (e) => {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, {type:'array'});
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const dosuData = parseDosu(sheet);
-        const headers = ['시간','차트번호','성함','회차','치료명칭','담당자'];
-        document.getElementById('dosuResult').innerHTML = createTable(headers, dosuData);
-        document.getElementById('downloadDosu').style.display = 'inline-block';
-        document.getElementById('downloadDosu').onclick = () => exportToExcel(dosuData, headers, '도수결과.xlsx');
+      reader1.onload = (e1) => {
+        const data1 = new Uint8Array(e1.target.result);
+        const wb1 = XLSX.read(data1, {type:'array'});
+        const dosuSheet = wb1.Sheets[wb1.SheetNames[0]];
+        const dosuParsed = parseDosu(dosuSheet);
+
+        const reader2 = new FileReader();
+        reader2.onload = (e2) => {
+          const data2 = new Uint8Array(e2.target.result);
+          const wb2 = XLSX.read(data2, {type:'array'});
+          const reserveSheet = wb2.Sheets[wb2.SheetNames[0]];
+          const reserveParsed = parseReserve(reserveSheet);
+
+          const compare = compareData(dosuParsed, reserveParsed);
+          const headers = ['차트번호','성함','시간(도수)','치료명칭(도수)','담당자(도수)','일일예약 시간','일일예약 치료명칭','일일예약 담당자','상태'];
+          document.getElementById('compareResult').innerHTML = createTable(headers, compare);
+          document.getElementById('downloadCompare').style.display = 'inline-block';
+          document.getElementById('downloadCompare').onclick = () => exportToExcel(compare, headers, '비교결과.xlsx');
+        };
+        reader2.readAsArrayBuffer(reserveFile);
       };
       reader1.readAsArrayBuffer(dosuFile);
-
-      const reader2 = new FileReader();
-      reader2.onload = (e) => {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, {type:'array'});
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const reserveData = parseReserve(sheet);
-        const headers = ['차트번호','치료명칭1','시간1','담당자1','치료명칭2','시간2','담당자2'];
-        document.getElementById('reserveResult').innerHTML = createTable(headers, reserveData);
-        document.getElementById('downloadReserve').style.display = 'inline-block';
-        document.getElementById('downloadReserve').onclick = () => exportToExcel(reserveData, headers, '일일예약결과.xlsx');
-      };
-      reader2.readAsArrayBuffer(reserveFile);
     }
   </script>
 </body>
