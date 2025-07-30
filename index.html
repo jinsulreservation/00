@@ -26,7 +26,6 @@
     <input type="file" id="dailyFile" accept=".xlsx, .xls" />
   </div>
   <div id="result"></div>
-
 <script>
 let dosuData = [];
 let dailyData = {};
@@ -37,59 +36,43 @@ const treatMap = {
   "충6.3": ["충격파치료6.3", "충격파6.3", "충6.3"],
   "충7": ["충격파치료7", "충격파7", "충7"],
   "충7.7": ["충격파치료7.7", "충격파7.7", "충7.7"],
-  "충9": ["충격파치료9", "충격파9", "충9"],
-  "충4.9": ["충격파치료4.9", "충4.9", "충격파4.9"]
+  "충9": ["충격파치료9", "충격파9", "충9"]
 };
 
-function normalizeTime(value) {
-  if (!value) return "";
-  if (typeof value === "number") {
-    const totalMinutes = Math.round(value * 24 * 60);
-    const hh = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
-    const mm = String(totalMinutes % 60).padStart(2, '0');
-    return `${hh}:${mm}`;
-  }
-  if (typeof value === "string") {
-    let parts = value.trim().split(":");
+function normalizeTime(time) {
+  if (!time) return "";
+  if (typeof time === "string") {
+    const parts = time.trim().split(":");
     if (parts.length === 2) {
-      return parts[0].padStart(2, "0") + ":" + parts[1].padStart(2, "0");
+      return parts.map(t => t.padStart(2, "0")).join(":");
     }
   }
+  if (typeof time === "number") {
+    const minutes = Math.round(time * 24 * 60);
+    const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
+    const mm = String(minutes % 60).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
   return "";
-}
-
-function 치료명칭일치(dosuTreat, dailyTreat) {
-  const candidates = treatMap[dosuTreat] || [dosuTreat];
-  return candidates.some(alias => dailyTreat.includes(alias));
 }
 
 function extractDosuSheet(sheet) {
   const data = XLSX.utils.sheet_to_json(sheet, {header: 1});
   const result = [];
-
-  for (let row = 4; row < data.length; row++) {
-    let time = normalizeTime(data[row]?.[4]);
-    if (!time) {
-      // 병합된 셀 대응: 위쪽 행의 시간 사용
-      for (let up = row - 1; up >= 0; up--) {
-        time = normalizeTime(data[up]?.[4]);
-        if (time) break;
-      }
-    }
-
-    for (let col = 5; col <= 11; col++) {
+  for (let col = 5; col <= 11; col++) {
+    for (let row = 4; row < data.length; row++) {
       const cell = data[row]?.[col];
+      const rawTime = data[row]?.[4];
+      const time = normalizeTime(rawTime);
       if (!cell || !time) continue;
-      const tokens = cell.toString().split(" ");
+      const tokens = cell.toString().split(/[\s\n]+/);
       const chart = tokens.find(t => /^\d+$/.test(t));
-      const treatRaw = tokens.find(t => !t.startsWith("#") && isNaN(t));
-      if (chart && treatRaw) {
-        const treat = Object.entries(treatMap).find(([_, v]) => v.includes(treatRaw))?.[0] || treatRaw;
+      const treat = tokens.find(t => !t.startsWith("#") && isNaN(t));
+      if (chart && treat) {
         result.push({차트번호: chart.trim(), 치료명칭: treat.trim(), 시간: time});
       }
     }
   }
-
   return result;
 }
 
@@ -97,8 +80,10 @@ function parseDailyMemo(memo) {
   if (typeof memo !== "string") return [];
   const matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\((\d{1,2}:\d{2})\)/g)];
   return matches.map(m => {
-    const treat = Object.entries(treatMap).find(([_, vals]) => vals.includes(m[1]))?.[0] || m[1];
-    return {치료명칭: treat, 시간: normalizeTime(m[2])};
+    const raw = m[1];
+    const time = m[2];
+    const treat = Object.entries(treatMap).find(([_, vals]) => vals.includes(raw))?.[0] || raw;
+    return {치료명칭: treat, 시간: normalizeTime(time)};
   });
 }
 
@@ -117,43 +102,42 @@ function extractDailySheet(sheet) {
 }
 
 function compareAndRender() {
-  if (dosuData.length === 0 || Object.keys(dailyData).length === 0) {
-    document.getElementById("result").innerHTML = "<p>📂 두 파일 모두 업로드해주세요.</p>";
-    return;
-  }
+  if (dosuData.length === 0 || Object.keys(dailyData).length === 0) return;
 
   const results = dosuData.map(row => {
-    const list = dailyData[row.차트번호] || [];
-    const match = list.some(d => 
-      d.시간 === row.시간 && 치료명칭일치(row.치료명칭, d.치료명칭)
+    const dailyList = dailyData[row.차트번호] || [];
+    const match = dailyList.some(d => 
+      normalizeTime(d.시간) === normalizeTime(row.시간) &&
+      (d.치료명칭 === row.치료명칭 || (treatMap[row.치료명칭]?.includes(d.치료명칭)))
     );
-    return {...row, 상태: match ? "확인" : (list.length ? "점검필요" : "-")};
+    return {
+      차트번호: row.차트번호,
+      치료명칭: row.치료명칭,
+      시간: row.시간,
+      상태: match ? "확인" : (dailyList.length ? "점검필요" : "-")
+    };
   });
 
   const total = results.length;
   const ok = results.filter(r => r.상태 === "확인").length;
   const warn = results.filter(r => r.상태 === "점검필요").length;
 
-  let html = `
-    <h3>📊 점검 결과</h3>
-    <p><strong>총 ${total}건 중 <span class="green">확인: ${ok}</span>건 / <span class="red">점검필요: ${warn}</span>건</strong></p>
+  const html = `
+    <h3>점검 결과</h3>
+    <p><strong>총 ${total}건 중 확인: ${ok}건 / 점검필요: ${warn}건</strong></p>
     <table>
       <thead><tr><th>차트번호</th><th>치료명칭</th><th>시간</th><th>상태</th></tr></thead>
       <tbody>
-  `;
+        ${results.map(r => `
+          <tr>
+            <td>${r.차트번호}</td>
+            <td>${r.치료명칭}</td>
+            <td>${r.시간}</td>
+            <td class="${r.상태 === "확인" ? "green" : r.상태 === "점검필요" ? "red" : ""}">${r.상태}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
 
-  results.forEach(r => {
-    html += `
-      <tr>
-        <td>${r.차트번호}</td>
-        <td>${r.치료명칭}</td>
-        <td>${r.시간}</td>
-        <td class="${r.상태 === "확인" ? "green" : r.상태 === "점검필요" ? "red" : ""}">${r.상태}</td>
-      </tr>
-    `;
-  });
-
-  html += "</tbody></table>";
   document.getElementById("result").innerHTML = html;
 }
 
