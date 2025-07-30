@@ -32,27 +32,34 @@ let dosuData = [];
 let dailyData = {};
 
 const treatMap = {
-  "도9": ["도수치료9", "도수9", "도9"],
-  "도15": ["도수치료15", "도수15", "도15"],
-  "충6.3": ["충격파치료6.3", "충격파6.3", "충6.3"],
-  "충7": ["충격파치료7", "충격파7", "충7"],
-  "충7.7": ["충격파치료7.7", "충격파7.7", "충7.7"],
-  "충9": ["충격파치료9", "충격파9", "충9"]
+  "도9": ["도수치료9", "도수9", "도9", "도수 9"],
+  "도15": ["도수치료15", "도수15", "도15", "도수 15"],
+  "충6.3": ["충격파치료6.3", "충격파6.3", "충6.3", "충격파 6.3"],
+  "충7": ["충격파치료7", "충격파7", "충7", "충격파 7"],
+  "충7.7": ["충격파치료7.7", "충격파7.7", "충7.7", "충격파 7.7"],
+  "충9": ["충격파치료9", "충격파9", "충9", "충격파 9"],
+  "도수": ["도수", "도수치료", "도수치료1회"],
+  "충격파": ["충격파", "충격파치료", "충격파치료1회"]
 };
 
 function normalizeTime(time) {
   if (!time) return "";
   if (typeof time === "string") {
-    const parts = time.trim().split(":");
-    if (parts.length === 2) {
-      return parts.map(t => t.padStart(2, "0")).join(":");
+    const match = time.trim().match(/(\d{1,2}):(\d{2})/);
+    if (match) {
+      const hh = match[1].padStart(2, "0");
+      const mm = match[2].padStart(2, "0");
+      return `${hh}:${mm}`;
     }
   }
   if (typeof time === "number") {
-    const minutes = Math.round(time * 24 * 60);
-    const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
-    const mm = String(minutes % 60).padStart(2, '0');
+    const totalMinutes = Math.round(time * 24 * 60);
+    const hh = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
+    const mm = String(totalMinutes % 60).padStart(2, '0');
     return `${hh}:${mm}`;
+  }
+  if (time instanceof Date) {
+    return time.toTimeString().slice(0, 5);
   }
   return "";
 }
@@ -72,7 +79,7 @@ function extractDosuSheet(sheet) {
         const chart = tokens.find(t => /^\d+$/.test(t));
         const treat = tokens.find(t => !t.startsWith("#") && isNaN(t));
         if (chart && treat) {
-          const stdTreat = Object.entries(treatMap).find(([k, v]) => v.includes(treat))?.[0] || treat;
+          const stdTreat = Object.entries(treatMap).find(([_, v]) => v.includes(treat))?.[0] || treat;
           result.push({차트번호: chart.trim(), 치료명칭: stdTreat.trim(), 시간: time});
         }
       }
@@ -85,7 +92,7 @@ function parseDailyMemo(memo) {
   if (typeof memo !== "string") return [];
   const matches = [...memo.matchAll(/([가-힣0-9.]+)\s*\((\d{1,2}:\d{2})\)/g)];
   return matches.map(m => {
-    const stdTreat = Object.entries(treatMap).find(([k, v]) => v.includes(m[1]))?.[0] || m[1];
+    const stdTreat = Object.entries(treatMap).find(([_, v]) => v.includes(m[1]))?.[0] || m[1];
     return {치료명칭: stdTreat, 시간: normalizeTime(m[2])};
   });
 }
@@ -94,8 +101,8 @@ function extractDailySheet(sheet) {
   const data = XLSX.utils.sheet_to_json(sheet);
   const map = {};
   data.forEach(row => {
-    const chart = String(row["차트번호"] || "").trim();
-    const memo = typeof row["메모"] === "string" ? row["메모"] : "";
+    const chart = String(row["차트번호"] || row["차트 번호"] || "").trim();
+    const memo = String(row["메모"] || row["예약메모"] || row["메모내용"] || "").trim();
     const entries = parseDailyMemo(memo);
     if (chart && entries.length > 0) {
       map[chart] = (map[chart] || []).concat(entries);
@@ -132,7 +139,6 @@ function compareAndRender() {
           </tr>`).join("")}
       </tbody>
     </table>`;
-
   document.getElementById("result").innerHTML = html;
 }
 
