@@ -66,8 +66,8 @@
       data.forEach(row => {
         const time = row[0] || row[4];
         row.slice(1).forEach(cell => {
-          if (typeof cell === "string" && cell.includes("#") && cell.includes("\n")) {
-            const [upper, lower] = cell.split("\n").map(x => x.trim());
+          if (typeof cell === "string" && cell.includes("#") && (cell.includes("\n") || cell.includes("\r"))) {
+            const [upper, lower] = cell.split(/\r?\n/).map(x => x.trim());
             const m1 = upper.match(/(\d+)([가-힣]+)#?(\d+)/);
             const m2 = lower.match(/(도수?\d*\.?\d*|도\d*\.?\d*|충\d*\.?\d*)\s*([가-힣A-Za-z()]+)/);
             if (m1 && m2) {
